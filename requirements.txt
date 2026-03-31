@@ -1,0 +1,17 @@
+transformers==4.44.2
+timm
+peft
+bitsandbytes>=0.41.0
+gradio
+torch>=2.0.0
+accelerate>=0.20.0
+pillow
+datasets
+sentencepiece
+protobuf
+einops
+
+# Optional: Install flash-attn for Flash Attention 2 (fastest attention)
+# Requires NVIDIA GPU with Ampere architecture or newer (RTX 30xx, A100, etc.)
+# Windows support is limited - the code will auto-fallback to SDPA if unavailable
+# pip install flash-attn --no-build-isolation
