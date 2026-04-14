@@ -1,6 +1,9 @@
-# Multimodal Educational Assistant with Florence-2
+# Multimodal Instructional Assistant with Florence-2
 
-A **Multimodal Educational Assistant** using Microsoft's **Florence-2** vision-language model to generate captions and educational questions from images.
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+A **Multimodal Instructional Assistant** that uses Microsoft's **Florence-2** vision-language model to generate captions and educational questions from images. Upload a diagram, chart, or any educational image and get instant AI-generated descriptions and study questions.
 
 ## ✨ Features
 
@@ -29,9 +32,16 @@ A **Multimodal Educational Assistant** using Microsoft's **Florence-2** vision-l
    pip install -r requirements.txt
    ```
 
-3. **For GPU support** (NVIDIA CUDA):
+3. **For GPU support** (NVIDIA CUDA 12.1):
    ```bash
    pip install torch --index-url https://download.pytorch.org/whl/cu121
+   ```
+
+4. **(Optional) Set HuggingFace token** for higher API rate limits:
+   ```bash
+   # Create a .env file or set the env variable directly
+   set HF_TOKEN=your_token_here   # Windows
+   export HF_TOKEN=your_token_here # Linux/Mac
    ```
 
 ## 🚀 Usage
@@ -91,6 +101,18 @@ multimodal captioner/
 ## 📚 Documentation
 
 For detailed technical documentation, architecture, and troubleshooting, see [PROJECT_SPECS.md](PROJECT_SPECS.md).
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create your feature branch: `git checkout -b feature/my-feature`
+3. Commit your changes: `git commit -m 'Add some feature'`
+4. Push to the branch: `git push origin feature/my-feature`
+5. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License.
 
 ## 🔗 References
 

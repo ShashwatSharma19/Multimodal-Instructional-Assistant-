@@ -1,5 +1,4 @@
-# Environments
-.env
+# ── Virtual Environments ──────────────────────────────────────────────────────
 .venv/
 env/
 venv/
@@ -7,22 +6,54 @@ ENV/
 env.bak/
 venv.bak/
 
-# Byte-compiled / optimized / DLL files
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.installed.cfg
+*.spec
 
-# PyTorch/HuggingFace cache and outputs
-.cache
+# ── ML / HuggingFace ──────────────────────────────────────────────────────────
+# Large model weights – never commit these
 output/
+*.bin
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+*.pkl
+*.h5
 
-# Data and Logs
+# HuggingFace local cache (in-project, if used)
+.cache/
+
+# ── Data ──────────────────────────────────────────────────────────────────────
 data/
+*.csv
+*.jsonl
+*.parquet
+
+# ── Logs & Run Artifacts ──────────────────────────────────────────────────────
 *.log
 app_output.log
-*.csv
+runs/
+wandb/
+mlruns/
+lightning_logs/
 
-# OS generated files
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
+.env.*
+secrets.json
+secrets.yaml
+
+# ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 .DS_Store?
 ._*
@@ -31,7 +62,18 @@ app_output.log
 ehthumbs.db
 Thumbs.db
 
-# IDEs and Editors
+# ── IDEs & Editors ────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
+*.swo
+*~
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── Coverage & Testing ────────────────────────────────────────────────────────
+.coverage
+htmlcov/
+.pytest_cache/
