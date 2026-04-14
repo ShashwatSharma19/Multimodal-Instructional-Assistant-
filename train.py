@@ -78,9 +78,12 @@ def train(args):
 
     # 6. Apply LoRA (PEFT)
     print("Applying PEFT/LoRA...")
+    # Florence-2's language backbone is BART-based, so we target BART attention
+    # and FFN layers (q/k/v/out_proj for attention, fc1/fc2 for feed-forward).
+    # Do NOT use LLaMA-style gate_proj/up_proj/down_proj — those won't match.
     lora_config = LoraConfig(
         r=8,
-        target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
+        target_modules=["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
         task_type=TaskType.CAUSAL_LM,
     )
     model = get_peft_model(model, lora_config)

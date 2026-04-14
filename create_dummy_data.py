@@ -28,18 +28,19 @@ def create_dummy_data(output_dir="data/dummy_dataset", num_samples=5):
             
         img.save(filepath)
         
-        # Create different task types for PaliGemma
+        # Create training entries with Florence-2 task token format
+        # (NOT PaliGemma format like "caption en" — Florence-2 uses <TASK> tokens)
         # 1. Captioning
         data.append({
             "file_name": filename,
-            "prompt": "caption en",
-            "completion": f"A {color} {shape} on a white background."
+            "prompt": "<MORE_DETAILED_CAPTION>",
+            "completion": f"A {color} {shape} centered on a white background."
         })
         
-        # 2. Q&A
+        # 2. Q&A (Florence-2 open-vocabulary QA format)
         data.append({
             "file_name": filename,
-            "prompt": f"question en What color is the {shape}?",
+            "prompt": f"<VQA>What color is the {shape}?",
             "completion": color
         })
         

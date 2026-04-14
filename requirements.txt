@@ -6,6 +6,7 @@ gradio
 torch>=2.0.0
 accelerate>=0.20.0
 pillow
+pandas
 datasets
 sentencepiece
 protobuf
