@@ -1,8 +1,8 @@
-# Multimodal Educational Assistant - Project Documentation
+# Multimodal Instructional Assistant – A Multimodal AI Pipeline for Educational Content Understanding and Contextual Question Generation- Project Documentation
 
 ## 📋 Project Overview
 
-This project is a **Multimodal Educational Assistant** that uses the **Florence-2** vision-language model to:
+This project is a **Multimodal Instructional Assistant** that uses the **Florence-2** vision-language model to:
 1. **Generate captions** for educational images (diagrams, charts, etc.)
 2. **Generate questions** from image content using OCR detection
 

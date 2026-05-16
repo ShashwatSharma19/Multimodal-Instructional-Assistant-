@@ -1,9 +1,75 @@
-from transformers import AutoProcessor, AutoModelForCausalLM, BitsAndBytesConfig
+from transformers import AutoProcessor, AutoModelForCausalLM, BitsAndBytesConfig, pipeline
 import torch
 from PIL import Image
 import os
 import time
 import warnings
+
+
+class TechnicalCaptionEnhancer:
+    """
+    CPU-based Phi-3-mini text LLM.
+    Takes OCR labels extracted by Florence-2 and produces coherent
+    educational explanations — handles any diagram with readable text.
+    Loaded lazily on first use so app startup stays fast.
+    """
+
+    MODEL_ID = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+
+    _SYS = "<|system|>\nYou are a concise educational assistant.\n</s>\n"
+    _USR = "<|user|>\n{prompt}\n</s>\n<|assistant|>\n"
+
+    def __init__(self):
+        self._pipe = None
+
+    def load(self):
+        """Eagerly load TinyLlama at app startup. Must be called before serving requests."""
+        if self._pipe is not None:
+            return
+        print("Loading TinyLlama on GPU (~10s)...")
+        self._pipe = pipeline(
+            "text-generation",
+            model=self.MODEL_ID,
+            torch_dtype=torch.float16,
+            device_map="cuda",
+        )
+        print("TinyLlama ready.")
+
+    def _load(self):
+        """Internal: ensures model is loaded (fallback safety call)."""
+        self.load()
+
+    def _run(self, prompt: str, max_new_tokens: int = 120) -> str:
+        self._load()
+        full_prompt = self._SYS + self._USR.format(prompt=prompt)
+        out = self._pipe(
+            full_prompt,
+            max_new_tokens=max_new_tokens,
+            do_sample=False,
+            temperature=None,
+            top_p=None,
+            return_full_text=False,
+        )
+        return out[0]["generated_text"].strip()
+
+    def enhance_caption(self, ocr_text: str, visual_caption: str = "") -> str:
+        prompt = (
+            f"A diagram has these visible labels: \"{ocr_text}\".\n"
+            f"Visual description: \"{visual_caption}\".\n"
+            "In 2-3 sentences, explain what type of diagram this is and what "
+            "educational concept it illustrates. Be specific."
+        )
+        return self._run(prompt, max_new_tokens=120)
+
+    def generate_questions(self, ocr_text: str, visual_caption: str = "") -> str:
+        prompt = (
+            f"A diagram has these labels: \"{ocr_text}\".\n"
+            f"Visual description: \"{visual_caption}\".\n"
+            "Write exactly 5 numbered study questions a student should answer "
+            "after studying this diagram."
+        )
+        return self._run(prompt, max_new_tokens=150)
+
 
 class Florence2Handler:
     def __init__(self, model_id="microsoft/Florence-2-large", device=None, 
@@ -25,7 +91,10 @@ class Florence2Handler:
             self.device = device
         self.model = None
         self.processor = None
-        
+
+        # Technical caption enhancer — lazy-loaded on first diagram with OCR text
+        self.enhancer = TechnicalCaptionEnhancer()
+
         # Optimization flags
         # Quantization disabled - causes hallucinations and slowdowns with Florence-2
         self.use_quantization = False  # Forced off for Florence-2
@@ -37,6 +106,20 @@ class Florence2Handler:
         """Determine best available attention implementation."""
         # Florence-2 custom model lacks SDPA support flag in current transformers
         return 'eager'
+
+    def _pad_to_square(self, image: Image.Image) -> Image.Image:
+        """
+        Pad image to square with white background.
+        Florence-2's DaViT vision backbone requires square feature maps;
+        non-square inputs cause 'only support square feature maps' AssertionError.
+        """
+        w, h = image.size
+        if w == h:
+            return image
+        max_dim = max(w, h)
+        square = Image.new("RGB", (max_dim, max_dim), (255, 255, 255))
+        square.paste(image, ((max_dim - w) // 2, (max_dim - h) // 2))
+        return square
     
     def _get_quantization_config(self):
         """Create 4-bit quantization config."""
@@ -57,6 +140,12 @@ class Florence2Handler:
                 self.model_id, 
                 trust_remote_code=True
             )
+            
+            # Bypass HuggingFace's AST import checker that strictly requires flash_attn
+            # even when the code gracefully falls back to eager attention.
+            import transformers.dynamic_module_utils
+            transformers.dynamic_module_utils.check_imports = lambda filename: []
+
             
             print(f"Loading model {self.model_id} on {self.device}...")
             print(f"  - Quantization: {'4-bit' if self.use_quantization else 'disabled'}")
@@ -116,6 +205,7 @@ class Florence2Handler:
                 return "Error: No image provided"
                 
             image = image.convert("RGB")
+            image = self._pad_to_square(image)  # Florence-2 requires square feature maps
             
             if text_input is None:
                 prompt = task_prompt
@@ -140,6 +230,7 @@ class Florence2Handler:
                     max_new_tokens=256,
                     do_sample=False,
                     num_beams=1,
+                    use_cache=False,  # Disable KV cache — EncoderDecoderCache incompatibility with Florence-2 custom generate()
                 )
                 
             generated_text = self.processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
@@ -176,8 +267,8 @@ class Florence2Handler:
         try:
             start_time = time.time()
             
-            # Convert all images to RGB
-            images = [img.convert("RGB") for img in images]
+            # Convert all images to RGB and pad to square
+            images = [self._pad_to_square(img.convert("RGB")) for img in images]
             image_sizes = [(img.width, img.height) for img in images]
             
             # Build prompts
@@ -211,6 +302,7 @@ class Florence2Handler:
                     max_new_tokens=256,
                     do_sample=False,
                     num_beams=1,
+                    use_cache=False,  # Disable KV cache — EncoderDecoderCache incompatibility with Florence-2 custom generate()
                 )
             
             # Decode all at once
@@ -240,12 +332,41 @@ class Florence2Handler:
             return [error_msg] * len(images)
 
     def caption(self, image):
-        """Generate caption for a single image."""
-        task = "<MORE_DETAILED_CAPTION>"
-        result = self.generate(image, task)
-        if isinstance(result, dict):
-            return result.get(task, str(result))
-        return str(result)
+        """
+        Generate caption for a single image.
+        Pipeline:
+          1. Run Florence-2 OCR to extract visible text labels.
+          2. Run Florence-2 visual caption for scene context.
+          3. If meaningful OCR text found → send both to Phi-3-mini for an
+             accurate, context-aware educational explanation.
+          4. If no OCR text (purely visual image) → return visual caption directly.
+        """
+        # Step 1: OCR
+        ocr_result = self.generate(image, "<OCR>")
+        ocr_text = ""
+        if isinstance(ocr_result, dict):
+            ocr_text = ocr_result.get("<OCR>", "").strip()
+        else:
+            ocr_text = str(ocr_result).strip()
+
+        # Step 2: Visual caption
+        visual_task = "<MORE_DETAILED_CAPTION>"
+        visual_result = self.generate(image, visual_task)
+        visual_caption = ""
+        if isinstance(visual_result, dict):
+            visual_caption = visual_result.get(visual_task, str(visual_result)).strip()
+        else:
+            visual_caption = str(visual_result).strip()
+
+        # Step 3: Enhance if OCR has meaningful content (>= 3 words)
+        if ocr_text and len(ocr_text.split()) >= 3:
+            try:
+                return self.enhancer.enhance_caption(ocr_text, visual_caption)
+            except Exception as e:
+                warnings.warn(f"Phi-3-mini enhancement failed, falling back: {e}")
+
+        # Step 4: Fallback — return Florence-2 visual caption
+        return visual_caption
     
     def caption_batch(self, images):
         """Generate captions for multiple images using true batching."""
@@ -255,58 +376,49 @@ class Florence2Handler:
     def generate_questions(self, image, num_questions=5):
         """
         Generate educational questions about the image.
-        Uses OCR and caption to identify content, then generates relevant questions.
+        Pipeline:
+          1. Run Florence-2 OCR to extract visible text labels.
+          2. Run Florence-2 visual caption for scene context.
+          3. If meaningful OCR text found → send both to Phi-3-mini to generate
+             specific, contextual study questions.
+          4. If no OCR text → generate generic visual questions from caption.
         """
         try:
-            # First, get OCR text to identify labels and text in the image
+            # Step 1: OCR
             ocr_result = self.generate(image, "<OCR>")
             ocr_text = ""
-            if isinstance(ocr_result, dict) and "<OCR>" in ocr_result:
-                ocr_text = ocr_result["<OCR>"]
-            
-            # Get detailed caption for context
+            if isinstance(ocr_result, dict):
+                ocr_text = ocr_result.get("<OCR>", "").strip()
+            else:
+                ocr_text = str(ocr_result).strip()
+
+            # Step 2: Visual caption
             caption_result = self.generate(image, "<MORE_DETAILED_CAPTION>")
-            caption = ""
-            if isinstance(caption_result, dict) and "<MORE_DETAILED_CAPTION>" in caption_result:
-                caption = caption_result["<MORE_DETAILED_CAPTION>"]
-            
-            # Generate questions based on the content
-            questions = []
-            
-            # Parse OCR text to find labels/terms
-            if ocr_text:
-                words = [w.strip() for w in ocr_text.replace('\n', ' ').split() if len(w.strip()) > 3]
-                unique_terms = list(dict.fromkeys(words))[:num_questions]
-                
-                question_templates = [
-                    "What is the function of the {}?",
-                    "Describe the role of {} in this diagram.",
-                    "Where is the {} located?",
-                    "What is the purpose of the {}?",
-                    "How does the {} work?",
-                ]
-                
-                for i, term in enumerate(unique_terms):
-                    if i < len(question_templates):
-                        questions.append(question_templates[i].format(term))
-                    else:
-                        questions.append(f"What can you tell about {term}?")
-            
-            # If no OCR terms, generate generic questions from caption
-            if not questions and caption:
-                questions = [
-                    "What is the main subject of this image?",
-                    "Describe the key components shown in this image.",
-                    "What educational concept does this image illustrate?",
-                    "What relationships can you identify in this diagram?",
-                    "How would you explain this image to a student?",
-                ]
-            
-            if not questions:
-                return "Could not generate questions. Please try a different image."
-            
-            return "\n".join([f"{i+1}. {q}" for i, q in enumerate(questions[:num_questions])])
-            
+            visual_caption = ""
+            if isinstance(caption_result, dict):
+                visual_caption = caption_result.get("<MORE_DETAILED_CAPTION>", str(caption_result)).strip()
+            else:
+                visual_caption = str(caption_result).strip()
+
+            # Step 3: Phi-3-mini generates specific questions if OCR has content
+            if ocr_text and len(ocr_text.split()) >= 3:
+                try:
+                    return self.enhancer.generate_questions(ocr_text, visual_caption)
+                except Exception as e:
+                    warnings.warn(f"Phi-3-mini question generation failed, falling back: {e}")
+
+            # Step 4: Fallback — generic questions from visual caption
+            if visual_caption:
+                return (
+                    "1. What is the main subject of this image?\n"
+                    "2. Describe the key components shown in this image.\n"
+                    "3. What educational concept does this image illustrate?\n"
+                    "4. What relationships can you identify in this diagram?\n"
+                    "5. How would you explain this image to a student?"
+                )
+
+            return "Could not generate questions. Please try a different image."
+
         except Exception as e:
             import traceback
             return f"Error generating questions: {e}\nTraceback: {traceback.format_exc()}"
